@@ -136,7 +136,9 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
       forgetOld(asks, started - REMEMBER_ASK_MS);
       forgetOld(used, started - REMEMBER_USED_MS);
       const key = `${turn.threadId}\0${ask.site}`;
-      const askedAt = ask.askedAt ?? asks.get(key) ?? started - ASKED_BEFORE_CALL_MS;
+      // A code box already on the page: an earlier call's ask counts only as far back as a step before this call could
+      // have asked, so a code mailed for an attempt minutes ago is never typed into this one.
+      const askedAt = ask.askedAt ?? Math.max(asks.get(key) ?? 0, started - ASKED_BEFORE_CALL_MS);
       asks.set(key, askedAt);
       const { boxes, unknown } = await mailboxes(bot, turn);
       if (!boxes.length) return unknown ? { kind: "miss", why: "unreadable" } : ask.via === "email" ? { kind: "no-mailbox" } : { kind: "skip" };

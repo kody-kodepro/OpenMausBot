@@ -82,6 +82,19 @@ describe("emailed codes through a connected Gmail", () => {
     expect(await codes.find(bot, turn, ask({ askedAt: NOW }), () => true)).toEqual({ kind: "miss", why: "used" });
   });
 
+  it("does not type a code mailed for an attempt minutes before this one, even when an earlier call asked on the same page", async () => {
+    const { codes, fake } = await setup();
+    fake.emails = [];
+    expect(await codes.find(bot, turn, ask({ askedAt: null }), () => true)).toEqual({ kind: "miss", why: "not-found" });
+    fake.emails = [gmailMail()];
+    const later = NOW + 10 * 60_000;
+    const at = (start: number) => { let clock = start; return ask({ askedAt: null, now: () => clock, sleep: async (ms) => { clock += ms; } }); };
+    expect(await codes.find(bot, turn, at(later), () => true)).not.toMatchObject({ kind: "code" });
+    // A code mailed just before this call, for the step that showed the box, still counts.
+    fake.emails = [gmailMail({ messageTimestamp: new Date(later - 30_000).toISOString() })];
+    expect(await codes.find(bot, turn, at(later), () => true)).toMatchObject({ kind: "code", code: CODE });
+  });
+
   it("treats a Gmail answer of another shape as unreadable, never as a code", async () => {
     const { codes, fake } = await setup();
     fake.emails = [gmailMail({ payload: undefined })];
