@@ -6903,7 +6903,7 @@ const { reportIncident, reportAsk, incidentRefused, retryThread } = createChiefN
 askToChief = (notification, how, tell) => {
   const bot = store.bot(notification.botId);
   const from = delegatorOf(notification.threadId);
-  if (!bot || !routesViaChief(notification, { enabled: cfg.features?.asksViaChief === true, team: Boolean(CLOUD_TEAM), routine: how?.routine === true,
+  if (!bot || !routesViaChief(notification, { enabled: cfg.features?.asksViaChief !== false, team: Boolean(CLOUD_TEAM), routine: how?.routine === true,
     handedOn: Boolean(from && from.threadId !== notification.threadId), personHere: personInConversation(store.activePath(notification.threadId)) })) return false;
   reportAsk({ bot, threadId: notification.threadId, notification, tell });
   return true;

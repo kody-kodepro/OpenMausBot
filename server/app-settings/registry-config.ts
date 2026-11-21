@@ -103,7 +103,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
     feature("bots.skillAuthoring", "Bots write their own skills", "Bots may draft skills for your review.", "early", ["skills", "write skills", "early", "experimental"], "skillAuthoring", true,
       "Let bots draft skills for your review", "Stop bots drafting skills"),
     feature("bots.asksViaChief", "Asks go to your Chief of Staff", "A bot's questions, approvals and sign-ins in work you are not in reach your Chief of Staff, who asks you in its chat, instead of a notification. Off a Team Cloud only.", "early",
-      ["chief of staff", "asks", "questions", "approvals", "inbox", "route"], "asksViaChief", false,
+      ["chief of staff", "asks", "questions", "approvals", "inbox", "route"], "asksViaChief", true,
       "Send bots' asks in work you are not in to your Chief of Staff", "Send bots' asks to you directly again"),
     section({
       id: "bots.skillReview", label: "Skill review", help: "The bot's engine reviews long conversations and updates its learned skills, every so many tool steps.", where: "early",
