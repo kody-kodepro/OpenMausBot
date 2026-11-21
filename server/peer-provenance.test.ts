@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { peerLine } from "../src/lib/peer-message.ts";
-import { continuedOrigin,
+import { continuedOrigin, relayedPersonWords,
   CONSENT_RULE, escapeNotes, OUTSIDE, peerLineText, peerProvenanceAuthor, peerProvenanceNote, reportNote, requestWorkOrigin,
   withPeerProvenance, workOrigin, type PeerProvenance, type WorkOrigin,
 } from "./peer-provenance.ts";
@@ -332,5 +332,27 @@ describe("the origin a continuation keeps", () => {
   it("a stopped request or none keeps nothing", () => {
     expect(continuedOrigin({ origin: lending, messageId: "m1", stopped: true }, "m1", true)).toBeUndefined();
     expect(continuedOrigin(undefined, "m1", true)).toBeUndefined();
+  });
+});
+
+describe("relayedPersonWords: a Chief passes on the person's own line, never its own claim", () => {
+  const origin = { kind: "user" as const, request: "Yes, go ahead with the new address" };
+
+  it("gives the harness's quote when the message carries it whole, in any case or spacing", () => {
+    expect(relayedPersonWords(origin, "Kody said: yes, go ahead   with the NEW address")).toBe("Yes, go ahead with the new address");
+    expect(relayedPersonWords(origin, "Yes, go ahead with the new address")).toBe("Yes, go ahead with the new address");
+  });
+
+  it("gives nothing for a bot's claim, a paraphrase, a part of the line, or work no person's line started", () => {
+    expect(relayedPersonWords(origin, "The user said yes")).toBeUndefined();
+    expect(relayedPersonWords(origin, "Yes, go ahead")).toBeUndefined();
+    expect(relayedPersonWords({ kind: "outside" }, "Yes, go ahead with the new address")).toBeUndefined();
+    expect(relayedPersonWords(undefined, "Yes, go ahead with the new address")).toBeUndefined();
+    expect(relayedPersonWords({ kind: "user", request: "   " }, "anything")).toBeUndefined();
+  });
+
+  it("matches a quote the harness cut short by what it kept", () => {
+    const long = { kind: "user" as const, request: "Approve the transfer and the rest…" };
+    expect(relayedPersonWords(long, "He wrote: approve the transfer and the rest of the plan")).toBe("Approve the transfer and the rest…");
   });
 });

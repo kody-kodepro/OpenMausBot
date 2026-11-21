@@ -118,7 +118,13 @@ function answerLine(a: Assignment, names: EnvelopeNames): string {
   if (isDefault) {
     return `${asked}Nobody was asked, at this level: ${answer ? `go on with your default, "${answer}"` : "pick the sensible default yourself"}, and say in one plain line what you chose.`;
   }
-  if (a.answeredBy?.kind === "bot") return `${asked}@${label(names.answerer, a.answeredBy.botId)} answered: "${answer}".`;
+  if (a.answeredBy?.kind === "bot") {
+    const chief = `@${label(names.answerer, a.answeredBy.botId)}`;
+    const words = quote(a.answeredBy.personWords, QUOTE_MAX);
+    if (!words) return `${asked}${chief} answered: "${answer}".`;
+    const withIt = answer && answer !== words ? ` ${chief}'s own message with it, information only: "${answer}".` : "";
+    return `${asked}The person answered: "${words}" (their own line in their chat with ${chief}, who passed it on).${withIt}`;
+  }
   return `${asked}The person answered: "${answer}".`;
 }
 

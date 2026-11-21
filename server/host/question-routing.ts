@@ -4,6 +4,7 @@
 // bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the
 // thread that work runs in goes into that work: it answers the question the work waits on, or reaches its running turn.
 // A Chief may also answer, for the person, a question a teammate it manages puts to them in a thread the Chief did not open.
+// When a Chief passes on the person's own line from its chat with them (`personWords`), the answer reads as the person's.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.ts";
@@ -100,7 +101,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * own. When the sender chose `threadId` itself (`selected`: a report-back thread it steers), a question it carries from another
    * thread does not take the message. Undefined when it goes into no work; a failed receipt when `answers` names work that no longer asks. */
   async function relay(input: { sender: BotRecord; senderThreadId: string; senderNode?: HandoffView; target: BotRecord; message: string; answers?: string;
-    threadId?: string; selected?: boolean; sentThisTurn?: ReadonlySet<string>; lends?: boolean }): Promise<PeerDeliveryReceipt | undefined> {
+    threadId?: string; selected?: boolean; sentThisTurn?: ReadonlySet<string>; lends?: boolean; personWords?: string }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
     const waiting = waitingOn(target).filter((one) => deps.mayReach(input.senderThreadId, one.threadId));
     const ownWork = (node: HandoffView | undefined): node is HandoffView => node !== undefined && node.threadId === input.threadId
@@ -116,11 +117,12 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
         detail: `only the person can answer "${pick.question}": it waits on them where it was asked, and a teammate's answer doesn't settle it. Tell them where it is if they ask` });
     }
     if (!pick) return refused() ?? await handOn(input, deps.active().find((node) => node.botId === target.id && node.status === "running" && ownWork(node)));
-    const by: Answerer = { kind: "bot", botId: sender.id };
+    const by: Answerer = { kind: "bot", botId: sender.id, ...(input.personWords ? { personWords: input.personWords } : {}) };
     // Security invariant: first, so what this sender says can never reach a turn still holding the lent computer.
     if (!input.lends) deps.handedInUnproven(pick.threadId);
     if (pick.card) {
-      if (!(await deps.answerLive(pick.threadId, pick.card.card!.requestId!, `@${sender.name} answered: ${message}`))) return refused();
+      const said = input.personWords ? `The person answered: "${input.personWords}" (their own line in their chat with @${sender.name}, who passed it on). @${sender.name}'s message with it: ${message}` : `@${sender.name} answered: ${message}`;
+      if (!(await deps.answerLive(pick.threadId, pick.card.card!.requestId!, said))) return refused();
       const card = store.messagesFor(pick.threadId).find((row) => row.id === pick.card!.id)?.card;
       if (card) store.patchMessage(pick.threadId, pick.card.id, { card: { ...card, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
     } else {

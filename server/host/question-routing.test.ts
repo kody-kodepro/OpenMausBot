@@ -115,6 +115,18 @@ describe("an answer passed on by another bot", () => {
     expect(w.rows("inbox").map((row) => row.tool?.name)).toEqual(["Answered Dachs's question"]);
   });
 
+  it("carries the person's own words a Chief passes on, so the answer reads as theirs, on a parked question and a live card", async () => {
+    const w = world();
+    const node = parked(w);
+    await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Marco: kurz und freundlich", answers: node.id, personWords: "kurz und freundlich" });
+    expect(w.answeredNodes).toEqual([{ id: node.id, text: "Marco: kurz und freundlich", by: { kind: "bot", botId: "fuchs", personWords: "kurz und freundlich" } }]);
+    const live = world({ live: ["q1"] });
+    live.store.appendMessage("chat", { role: "bot", kind: "options", text: "CSV?", card: { title: "Question", subtitle: "CSV or Excel?", options: [], requestId: "q1", requestType: "question" } });
+    live.node({ id: "as_2", threadId: "chat", status: "running" });
+    await live.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", answers: "as_2", personWords: "Excel" });
+    expect(live.answeredLive.map((one) => one.text)).toEqual(['The person answered: "Excel" (their own line in their chat with @Fuchs, who passed it on). @Fuchs\'s message with it: Excel']);
+  });
+
   it("answers the question the sender's own turn was resumed with, without naming it", async () => {
     const w = world();
     const node = parked(w);

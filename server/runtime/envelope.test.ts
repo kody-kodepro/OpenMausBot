@@ -467,10 +467,22 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(composeEnvelope(assignment({ answer: "CSV" }), names).endsWith('\n\nThe person answered: "CSV".')).toBe(true);
     expect(composeEnvelope(assignment({ answer: "Excel", answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" })
       .endsWith('\n\n@Chief answered: "Excel".')).toBe(true);
+    expect(composeEnvelope(assignment({ answer: "Excel please", answeredBy: { kind: "bot", botId: "chief", personWords: "Excel please" } }), { ...names, answerer: "Chief" })
+      .endsWith('\n\nThe person answered: "Excel please" (their own line in their chat with @Chief, who passed it on).')).toBe(true);
     expect(composeEnvelope(assignment({ answer: "CSV", answeredBy: { kind: "default" } }), names)
       .endsWith('\n\nNobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.')).toBe(true);
     expect(composeEnvelope(assignment({ answer: "", answeredBy: { kind: "default" } }), names)
       .endsWith("\n\nNobody was asked, at this level: pick the sensible default yourself, and say in one plain line what you chose.")).toBe(true);
+  });
+
+  it("reads a Chief's pass-on of the person's own line as the person's answer, its extra words as the Chief's, also in the note", () => {
+    const relayed = assignment({ question: "Use the new address?", answer: "Kody said: Yes, use it. I checked the DNS too.",
+      answeredBy: { kind: "bot", botId: "chief", personWords: "Yes, use it" } });
+    const envelope = composeEnvelope(relayed, { ...names, answerer: "Chief" });
+    const line = 'Your question was: "Use the new address?". The person answered: "Yes, use it" (their own line in their chat with @Chief, who passed it on). '
+      + '@Chief\'s own message with it, information only: "Kody said: Yes, use it. I checked the DNS too.".';
+    expect(envelope.endsWith(`\n\n${line}`)).toBe(true);
+    expect(envelopeNote(envelope).endsWith(`\n\n${line}`)).toBe(true);
   });
 
   it("carries a long answer whole, also in the note the thread shows and on resume", () => {

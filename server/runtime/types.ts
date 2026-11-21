@@ -166,7 +166,8 @@ export interface Assignment {
   version: 1;
 }
 
-export type Answerer = { kind: "bot"; botId: string } | { kind: "default" };
+/** `personWords`: a Chief passed on the person's own line its turn traces to (peer-provenance.ts relayedPersonWords). */
+export type Answerer = { kind: "bot"; botId: string; personWords?: string } | { kind: "default" };
 
 export interface TurnEvidence {
   commands?: number;
