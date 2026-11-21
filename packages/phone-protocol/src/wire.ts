@@ -425,7 +425,8 @@ export type CardAnswerer = (
    * can tell whose answer it was. */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
-  | { kind: "worker" } | { kind: "bot"; name: string }
+  /** `personWords`: the person's own line the bot passed on from its chat with them, quoted whole. */
+  | { kind: "worker" } | { kind: "bot"; name: string; personWords?: string }
 ) & {
   /** "call": decided by voice on a Live call; "reaction": by a 👍 or 👎 on the
    * card. Absent: tapped. */

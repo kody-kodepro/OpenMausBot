@@ -185,6 +185,7 @@ describe("an answer passed on by another bot", () => {
     const named = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Gmail, the person's address", answers: node.id });
     expect(named).toMatchObject({ botId: "dachs", outcome: "failed" });
     expect(named?.detail).toContain("only the person can answer");
+    expect(named?.detail).toContain("Their Chief may pass on their answer");
     // Unnamed too: from the turn that was resumed with it, and to the thread the requester's earlier work waits in.
     expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root", carrying: [node.id] } as HandoffView, target: DACHS, message: "Gmail" }))
       .toMatchObject({ outcome: "failed" });
@@ -192,6 +193,33 @@ describe("an answer passed on by another bot", () => {
       .toMatchObject({ outcome: "failed" });
     expect(w.answeredNodes).toEqual([]);
     expect(w.rows("work")[0]!.card?.answered).toBeUndefined();
+  });
+
+  it("takes the person's own words a Chief passes on for which of their accounts to use, and the card and the Chief's chat keep that line", async () => {
+    const w = world();
+    const node = parked(w, { question: "Which FuZion login or user ID does the person use?" });
+    const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Kody says: \"kodyholman@icloud.com\"", answers: node.id, personWords: "kodyholman@icloud.com" });
+    expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected" });
+    expect(w.answeredNodes).toHaveLength(1);
+    expect(w.rows("work")[0]!.card).toMatchObject({ answered: "answer", answeredBy: { kind: "bot", name: "Fuchs", personWords: "kodyholman@icloud.com" } });
+    expect(w.rows("inbox").find((row) => row.kind === "activity")?.tool?.output).toContain("the person's own words, passed on: \"kodyholman@icloud.com\"");
+
+    const live = world({ live: ["req-1"] });
+    live.node({ id: "as_live", status: "running" });
+    live.store.appendMessage("work", { role: "bot", kind: "options", text: "Which login?", card: { title: "Your bot has a question", subtitle: "Which login should I use for FuZion?", options: [], requestId: "req-1", requestType: "question" } });
+    expect(await live.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "\"kodyholman@icloud.com\"", answers: "as_live", personWords: "kodyholman@icloud.com" })).toMatchObject({ outcome: "injected" });
+    expect(live.rows("work")[0]!.card).toMatchObject({ answeredBy: { kind: "bot", name: "Fuchs", personWords: "kodyholman@icloud.com" } });
+  });
+
+  it("still refuses the person's passed-on words for a password, a code, a sign-in or a payment", async () => {
+    for (const question of ["What's the password for the FuZion portal?", "Which verification code did you get?", "Please sign in to the bank portal", "Should I pay the invoice?"]) {
+      const w = world();
+      const node = parked(w, { question });
+      const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "\"hunter2\"", answers: node.id, personWords: "hunter2" });
+      expect(receipt, question).toMatchObject({ outcome: "failed" });
+      expect(receipt?.detail, question).toContain("stays theirs even when they tell you");
+      expect(w.answeredNodes, question).toEqual([]);
+    }
   });
 
   it("answers the question card the turn of the requester's earlier work waits on, from a later turn, unnamed", async () => {
@@ -281,6 +309,24 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
       expect(await answer(w, threadId), threadId).toBeUndefined();
     }
     expect([...idle.answeredLive, ...theirs.answeredLive, ...w.answeredLive]).toEqual([]);
+  });
+
+  it("answers a question only the person can answer with their own words a Chief passes on, saying they are theirs, but never a sign-in", async () => {
+    const w = world({ live: ["req-p"] });
+    asks(w, "chat", "Which FuZion login should I use?");
+    const receipt = await w.routing.answerForPerson({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, threadId: "chat", message: "Kody: \"kodyholman@icloud.com\"", personWords: "kodyholman@icloud.com" });
+    expect(receipt).toMatchObject({ outcome: "injected", threadId: "chat" });
+    expect(w.answeredLive).toEqual([{ threadId: "chat", requestId: "req-p",
+      text: "The person answered: \"kodyholman@icloud.com\" (their own line in their chat with @Fuchs, who passed it on). @Fuchs's message with it: Kody: \"kodyholman@icloud.com\"" }]);
+    expect(w.rows("chat")[0]!.card).toMatchObject({ answeredBy: { kind: "bot", name: "Fuchs", personWords: "kodyholman@icloud.com" } });
+    // Without the person's words a Chief still cannot answer it.
+    const bare = world({ live: ["req-p"] });
+    asks(bare, "chat", "Which FuZion login should I use?");
+    expect(await answer(bare, "chat")).toBeUndefined();
+    const secret = world({ live: ["req-p"] });
+    asks(secret, "chat", "Please sign in to the bank portal");
+    expect(await secret.routing.answerForPerson({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, threadId: "chat", message: "\"done\"", personWords: "done" })).toBeUndefined();
+    expect([...bare.answeredLive, ...secret.answeredLive]).toEqual([]);
   });
 
   it("leaves with the person, and does not list, a question in work an outside event started", async () => {

@@ -4,14 +4,16 @@
 // bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the
 // thread that work runs in goes into that work: it answers the question the work waits on, or reaches its running turn.
 // A Chief may also answer, for the person, a question a teammate it manages puts to them in a thread the Chief did not open.
-// When a Chief passes on the person's own line from its chat with them (`personWords`), the answer reads as the person's.
+// When a Chief passes on the person's own line from its chat with them (`personWords`), the answer reads as the person's,
+// and it also settles what only the person can answer in words, such as which of their logins to use. A sign-in, a code,
+// a secret or a payment still waits on them where it was asked.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { escapeNotes } from "../peer-provenance.ts";
 import { AUTHORITY } from "../provenance-label.ts";
 import { composeAddition } from "../runtime/envelope.ts";
-import { personOnly, withDefault } from "../runtime/questions.ts";
+import { personOnly, personSecret, withDefault } from "../runtime/questions.ts";
 import type { Answerer } from "../runtime/types.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -54,6 +56,13 @@ interface Waiting {
   node?: HandoffView;
   card?: Message;
 }
+
+/** Who settled a card: the bot, and the person's own line when it passed that on, so the card shows whose answer it was. */
+const answeredBy = (sender: BotRecord, personWords: string | undefined) => ({ kind: "bot" as const, name: sender.name, ...(personWords ? { personWords } : {}) });
+
+/** The line in the sender's chat that records what it answered, quoting the person when it passed on their words. */
+const relayedLine = (question: string, personWords: string | undefined): string =>
+  (personWords ? `${question.slice(0, 300)} · the person's own words, passed on: "${personWords.slice(0, 200)}"` : question.slice(0, 400));
 
 export function createQuestionRouting(deps: QuestionRoutingDeps) {
   const { store } = deps;
@@ -111,10 +120,14 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
         ?? waiting.find((one) => ownWork(one.node) && (one.card !== undefined || !one.node.cards?.length));
     const refused = () => input.answers === undefined ? undefined : peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed", instructionOnly: true,
       detail: `nothing of ${target.name}'s waits on an answer as ${input.answers}: it was answered or its work ended. Send it without answers if it still needs doing` });
-    // A question in words only the person can answer; a wait on a card (a sign-in) is still settled from elsewhere.
-    if (pick && personOnly(pick.question) && !pick.node?.cards?.length) {
+    // A question in words only the person can answer; a wait on a card (a sign-in) is still settled from elsewhere. Their own
+    // line, passed on whole by their Chief, settles it unless it is a sign-in, a code, a secret or a payment.
+    if (pick && personOnly(pick.question) && !pick.node?.cards?.length && (!input.personWords || personSecret(pick.question))) {
       return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
-        detail: `only the person can answer "${pick.question}": it waits on them where it was asked, and a teammate's answer doesn't settle it. Tell them where it is if they ask` });
+        // The receipt keeps 200 characters, so what may settle it comes before the question.
+        detail: `only the person can answer this; a teammate's answer doesn't settle it. ${personSecret(pick.question)
+          ? "A sign-in, code, secret or payment stays theirs even when they tell you"
+          : "Their Chief may pass on their answer, quoting their own line whole from the turn it started"}: "${pick.question}"` });
     }
     if (!pick) return refused() ?? await handOn(input, deps.active().find((node) => node.botId === target.id && node.status === "running" && ownWork(node)));
     const by: Answerer = { kind: "bot", botId: sender.id, ...(input.personWords ? { personWords: input.personWords } : {}) };
@@ -124,17 +137,17 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
       const said = input.personWords ? `The person answered: "${input.personWords}" (their own line in their chat with @${sender.name}, who passed it on). @${sender.name}'s message with it: ${message}` : `@${sender.name} answered: ${message}`;
       if (!(await deps.answerLive(pick.threadId, pick.card.card!.requestId!, said))) return refused();
       const card = store.messagesFor(pick.threadId).find((row) => row.id === pick.card!.id)?.card;
-      if (card) store.patchMessage(pick.threadId, pick.card.id, { card: { ...card, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
+      if (card) store.patchMessage(pick.threadId, pick.card.id, { card: { ...card, answered: "answer", answeredText: message, answeredBy: answeredBy(sender, input.personWords) } });
     } else {
       const node = pick.node!;
       if (!deps.answerNode(node.id, message, by)) return refused();
       if (node.cards?.length) deps.settleSignIns(node);
       const asked = store.messagesFor(node.threadId).find((row) => row.card?.requestId?.startsWith(`needs-input-${node.id}-`) && !row.inbox
         && (!row.card.answered || (row.card.answeredBy?.kind === "bot" && row.card.answeredText === undefined)));
-      if (asked?.card) store.patchMessage(node.threadId, asked.id, { card: { ...asked.card, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
+      if (asked?.card) store.patchMessage(node.threadId, asked.id, { card: { ...asked.card, answered: "answer", answeredText: message, answeredBy: answeredBy(sender, input.personWords) } });
     }
     store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: { botId: sender.id, name: sender.name, color: sender.color },
-      tool: { name: `Answered ${target.name}'s question`, ok: true, output: pick.question.slice(0, 400) },
+      tool: { name: `Answered ${target.name}'s question`, ok: true, output: relayedLine(pick.question, input.personWords) },
       threadRef: { botId: target.id, threadId: pick.threadId, title: store.taskByThread(target.id, pick.threadId)?.title ?? target.name } });
     return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "injected", threadId: pick.threadId, ...(pick.node ? { requestId: pick.node.id } : {}),
       detail: `answered its question "${pick.question}"; it carries on with your answer, and its result returns to whoever handed it that work` });
@@ -156,11 +169,11 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
 
   /** The question card `botId`'s turn in `threadId` waits on that a Chief may answer for the person: answerable in words, not
    * one only the person can answer, and not in work an outside event started, whose questions stay theirs. */
-  function forPerson(botId: string, threadId: string): { row: Message; question: string } | undefined {
+  function forPerson(botId: string, threadId: string, personWords?: string): { row: Message; question: string } | undefined {
     if (deps.unattended(botId, threadId)) return undefined;
     const row = store.messagesFor(threadId).findLast((one) => !one.inbox && answerableInWords(one.card) && deps.live(threadId, one.card!.requestId!));
     const question = row?.card ? row.card.subtitle || row.card.title : "";
-    return row && !personOnly(question) ? { row, question } : undefined;
+    return row && (!personOnly(question) || (personWords !== undefined && !personSecret(question))) ? { row, question } : undefined;
   }
 
   /** What the Chief's turns list: the questions `teammates` (those it manages) wait on the person for, in threads the Chief
@@ -179,22 +192,24 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * Undefined when the thread waits on no question the Chief may answer, so the usual thread rules apply: a sign-in, an
    * approval or a question only the person can answer stays theirs. The card shows the Chief's answer, and the person's own
    * answer still replaces it. */
-  async function answerForPerson(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; threadId: string; message: string; lends?: boolean }): Promise<PeerDeliveryReceipt | undefined> {
+  async function answerForPerson(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; threadId: string; message: string; lends?: boolean; personWords?: string }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, threadId, message } = input;
     const task = store.taskByThread(target.id, threadId);
     if (!task || task.archivedAt !== undefined || task.openedBy?.botId === sender.id) return undefined;
-    const asked = forPerson(target.id, threadId);
+    const asked = forPerson(target.id, threadId, input.personWords);
     if (!asked) return undefined;
     const { row, question } = asked, card = row.card!;
     if (!input.lends) deps.handedInUnproven(threadId);
-    if (!(await deps.answerLive(threadId, card.requestId!, `@${sender.name} answered for the person: ${message}`))) {
+    const said = input.personWords ? `The person answered: "${input.personWords}" (their own line in their chat with @${sender.name}, who passed it on). @${sender.name}'s message with it: ${message}`
+      : `@${sender.name} answered for the person: ${message}`;
+    if (!(await deps.answerLive(threadId, card.requestId!, said))) {
       return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed", threadId,
         detail: `${target.name}'s question "${question}" was answered or closed meanwhile; nothing was sent` });
     }
     const settled = store.messagesFor(threadId).find((one) => one.id === row.id)?.card;
-    if (settled) store.patchMessage(threadId, row.id, { card: { ...settled, answered: "answer", answeredText: message, answeredBy: { kind: "bot", name: sender.name } } });
+    if (settled) store.patchMessage(threadId, row.id, { card: { ...settled, answered: "answer", answeredText: message, answeredBy: answeredBy(sender, input.personWords) } });
     store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: { botId: sender.id, name: sender.name, color: sender.color },
-      tool: { name: serverLine(conversationLanguage(input.senderThreadId), "server.teammates.answeredForPerson", { name: target.name }), ok: true, output: question.slice(0, 400) },
+      tool: { name: serverLine(conversationLanguage(input.senderThreadId), "server.teammates.answeredForPerson", { name: target.name }), ok: true, output: relayedLine(question, input.personWords) },
       threadRef: { botId: target.id, threadId, title: task.title } });
     return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "injected", threadId,
       detail: `answered its question "${question}" for the person; it carries on with your answer, and the person can still give their own in that thread` });

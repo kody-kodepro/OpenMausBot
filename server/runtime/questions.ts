@@ -20,6 +20,20 @@ const PERSON_ONLY = new RegExp([
   "welche[snm]? (?:(?!des |der |dem |von )[\\w-]+ ){0,3}[\\w-]*(?:konto|konten|postf|login|zugang|anmeldung)",
 ].map((stem) => `\\b${stem}`).join("|"), "iu");
 
+// The part of that no one may pass on in words, even the person's own Chief quoting them: a sign-in, a code, a password,
+// a secret, a key or a payment. Which of their accounts or logins to use is not here: the person can say that in any chat.
+const PERSON_SECRET = new RegExp([
+  "sign(?:ed|ing)?[- ]?(?:in|on)", "log(?:ged|ging)?[- ]in\\b", "2fa", "two[- ]factor", "one[- ]time (?:code|password)", "otp\\b",
+  "verification code", "security code", "captcha", "passkey", "password", "passcode", "secret", "api[- ]?key", "access token",
+  "credential", "pay\\b", "pays\\b", "paying", "payment", "purchas", "buy\\b", "buying", "credit card", "card details", "connect your",
+  "anmeld", "einlogg", "passwort", "kennwort", "zugangsdaten", "schlüssel", "bezahl", "zahlung", "kaufen", "kreditkarte",
+].map((stem) => `\\b${stem}`).join("|"), "iu");
+
+/** Whether a question asks for a sign-in, a code, a secret or a payment: never settled by words passed on from a chat. */
+export function personSecret(question: string): boolean {
+  return PERSON_SECRET.test(question);
+}
+
 /** Whether a question asks for something no bot can give: a sign-in, a payment, a secret or the person's own account. */
 export function personOnly(question: string): boolean {
   return PERSON_ONLY.test(question);
