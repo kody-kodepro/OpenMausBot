@@ -238,7 +238,7 @@ import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./dri
 import { forgetNotificationReader, liveAppRows, openCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt, threadsWithCardsSince } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
-import { createChiefNotices } from "./host/chief-notices.ts"; import { sessionHolds } from "./routine-recovery.ts"; import { dismissLeftoverPeerCards } from "./host/leftover-peer-cards.ts";
+import { createChiefNotices } from "./host/chief-notices.ts"; import { personInConversation, routesViaChief } from "./host/asks-via-chief.ts"; import { sessionHolds } from "./routine-recovery.ts"; import { dismissLeftoverPeerCards } from "./host/leftover-peer-cards.ts";
 import { createHandoffTicks } from "./handoff-ticks.ts"; import { IDLE_HTTP_SERVER } from "./due-timer.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
@@ -4915,9 +4915,14 @@ const providerLabel = (provider: string): string => {
 const quietTurnThreads = new Set<string>(); const doneNotice = createDoneNotice({ awaitingTeammates: (threadId) => coordinator.awaitingTeammateThreads().has(threadId), queuedFollowUp: hasQueuedPersonMessage }); const personWaits = createPersonWaits({ store, notify, threadsWithCards: threadsWithCardsSince });
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
+/** Set once the Chief's notices exist: with features.asksViaChief, an ask the person isn't there for goes to their Chief. */
+let askToChief: ((notification: Notification, how: { routine?: boolean } | undefined, tell: () => void) => boolean) | null = null;
+
 function notify(notification: Notification | null, how?: { routine?: boolean; summary?: boolean }) {
   if (notification && QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
-  const routed = notification && teamMessages.route(notification, how); if (routed) broadcast({ kind: "notify", notification: logNotification(routed) }); teamAway.notified(notification, routed, how);
+  const tell = () => { const routed = notification && teamMessages.route(notification, how); if (routed) broadcast({ kind: "notify", notification: logNotification(routed) }); teamAway.notified(notification, routed, how); };
+  if (notification && askToChief?.(notification, how, tell)) return;
+  tell();
 }
 
 const roomTurnLevels = createRoomTurnLevels();
@@ -6887,7 +6892,7 @@ function runtimeWorkPending(threadId: string): boolean {
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
 
-const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
+const { reportIncident, reportAsk, incidentRefused, retryThread } = createChiefNotices({
   store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId) || botApiThread(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), confined: cloudGuestDriven, threadLanguage,
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
@@ -6895,6 +6900,14 @@ const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
   ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
   continueRequest: (botId, threadId, text) => startTurn(botId, text, { threadId, unattended: true, cardContinuation: true, requestMessageId: directRequestOwners.get(threadId)?.messageId }),
 });
+askToChief = (notification, how, tell) => {
+  const bot = store.bot(notification.botId);
+  const from = delegatorOf(notification.threadId);
+  if (!bot || !routesViaChief(notification, { enabled: cfg.features?.asksViaChief === true, team: Boolean(CLOUD_TEAM), routine: how?.routine === true,
+    handedOn: Boolean(from && from.threadId !== notification.threadId), personHere: personInConversation(store.activePath(notification.threadId)) })) return false;
+  reportAsk({ bot, threadId: notification.threadId, notification, tell });
+  return true;
+};
 
 function turnAnswers(threadId: string, opts?: {
   cardContinuation?: boolean; requestMessageId?: string; coordination?: { id: string };

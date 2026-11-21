@@ -11,6 +11,7 @@ import { quoteInNote } from "../peer-provenance.ts";
 import { peerName } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { serverLine } from "../server-lines.ts";
+import { askChip, askText, ASKS_THREAD_TITLE } from "./asks-via-chief.ts";
 import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -174,12 +175,15 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
 
   function deliver(input: {
     chief: BotRecord | null; title: string; bot: BotRecord; threadId: string; chip: string; text: string; alreadyNotified: boolean;
+    /** Not a problem but an ask: it starts the Chief with this, and `tell` reaches the person when the Chief can't. */
+    ask?: { peerAsk: PeerAsk; tell(): void };
   }): "chief" | "person" {
     const { chief, bot, threadId } = input;
     const task = store.taskByThread(bot.id, threadId);
     const group = store.groupByThread(threadId);
     const tellThePerson = () => {
-      if (!input.alreadyNotified) {
+      if (input.ask) input.ask.tell();
+      else if (!input.alreadyNotified) {
         deps.notify(buildNotification("incident", bot, threadId, input.chip, {
           avatarUrl: bot.avatarUrl,
           ...(group ? { group: { id: group.id, name: group.name } } : {}),
@@ -209,7 +213,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       tool: { name: input.chip, ok: false },
       threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
     });
-    const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
+    const peerAsk: PeerAsk = input.ask?.peerAsk ?? { botId: bot.id, name: bot.name, unattended: true,
       incident: { threadId, ...(input.alreadyNotified ? { notified: true } : {}) } };
     const decision = admit("incident", {}, {
       threadBusy: deps.threadBusy(chief.id, notices.threadId),
@@ -221,7 +225,10 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       return "chief";
     }
     void deps.startTurn(chief.id, input.text, { threadId: notices.threadId, unattended: true, peerAsk }).catch((error) => {
-      incidentRefused(chief, notices.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
+      const why = error instanceof Error ? error.message : String(error);
+      if (!input.ask) return incidentRefused(chief, notices.threadId, [peerAsk], why);
+      store.appendMessage(notices.threadId, { role: "bot", kind: "activity", tool: failedTurnTool(`the ask could not reach ${chief.name} — ${why}`) });
+      input.ask.tell();
     });
     return "chief";
   }
@@ -278,5 +285,19 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     });
   }
 
-  return { reportIncident, incidentRefused, retryRefusal, retryThread };
+  /** A teammate's ask the person isn't there for goes to its Chief, who raises it in its chat with them. Whenever no Chief
+   * may hear it (none, a Chief's own ask, a quiet or confined conversation, the Chief's hour spent, its turn failing), `tell`
+   * notifies the person as before, once. */
+  function reportAsk(input: { bot: BotRecord; threadId: string; notification: Notification; tell(): void }): "chief" | "person" {
+    const { bot, threadId, notification } = input;
+    const chief = deps.quietThread?.(bot.id, threadId) ? null : chiefForBot(store.bots, bot);
+    if (!chief || !reachesChief(chief, bot, threadId)) { input.tell(); return "person"; }
+    const title = store.taskByThread(bot.id, threadId)?.title ?? `${bot.name}'s conversation`;
+    return deliver({
+      chief, title: ASKS_THREAD_TITLE, bot, threadId, chip: askChip(bot.name, notification), text: askText(bot.name, title, notification), alreadyNotified: false,
+      ask: { peerAsk: { botId: bot.id, name: bot.name, unattended: true }, tell: input.tell },
+    });
+  }
+
+  return { reportIncident, reportAsk, incidentRefused, retryRefusal, retryThread };
 }
