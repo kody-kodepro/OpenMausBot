@@ -106,6 +106,8 @@ mac:
       arch: [arm64, x64]
   # Kode patch: own icon and visible name. Bundle id and productName stay
   # OpenMausBot so the settings folder, keychain items and permissions carry over.
+  # CFBundleName must stay OpenMausBot too: Electron finds its helpers as
+  # "<CFBundleName> Helper.app" and aborts at launch when they don't match.
   icon: build/kode.icns
   category: public.app-category.productivity
   hardenedRuntime: true
@@ -135,7 +137,6 @@ mac:
     - from: dist-native/duckdb/darwin-${arch}/node_modules
       to: duckdb/node_modules
   extendInfo:
-    CFBundleName: Kode
     CFBundleDisplayName: Kode
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
