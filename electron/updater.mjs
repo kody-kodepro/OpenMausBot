@@ -189,8 +189,12 @@ export function attachUpdaterWindow(mainWindow) {
 }
 
 /** `signals` (quietSignals): what tells a quiet moment; without them a downloaded update installs only on Restart or quit. */
+// Kode's patched build: it updates by rebuilding the kode branch on upstream's next release,
+// never from upstream's own releases, which would drop its patches.
+const PATCHED_BUILD = true;
+
 export function startUpdater(signals = null) {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || PATCHED_BUILD) {
     updaterCoordinator = null;
     setState({ status: "idle" });
     return;
